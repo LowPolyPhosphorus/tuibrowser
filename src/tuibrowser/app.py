@@ -3,6 +3,7 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
+from urllib.parse import quote_plus
 
 from .fetch import fetch
 from .parse import parse
@@ -34,6 +35,9 @@ class Browser(App):
         ("k", "up", "Up"),
         ("g", "open_url", "Go to URL"),
         ("b", "back", "Back"),
+        ("r", "reload", "Reload"),
+        ("d", "page down", "Page down"),
+        ("u", "page up", "Page up"),
     ]
 
     def __init__(self, start_url: str):
@@ -94,19 +98,34 @@ class Browser(App):
         if self.history:
             self.load(self.history.pop(), push=False)
 
+    def action_reload(slef) -> None:
+        if self.url:
+            self.load(self.url, push=False)
+
+    def action_page_down(self) -> None:
+        self.query_one("#page").scroll_page_down()
+
+    def action_page_up(self) -> None:
+        self.query_one("#page").scroll_page_up()
+
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.input.display = False
         self.query_one("#page").focus()
-        if event.value.strip():
-            self.load(event.value.strip())
+        text = event.value.strip()
+        if text:
+            if " " in text or ("." not in text and "://" not in text):
+                text = "https://html.duckduckgo.com/html/?q=" + quote_plus(text)
+            self.load(text)
 
     # --- link numbers: type digits, press Enter ---
     def on_key(self, event) -> None:
         if self.query_one("#url", Input).has_focus:
             return
         if event.key.isdigit():
-            self.buffer += event.key
-            self.set_status(f"link: {self.buffer}  (Enter to follow, Esc to cancel)")
+            n = int(self.buffer)
+            target = self.links[n - 1] if 1 <= n <= len(self.links) else "no such link"
+            self.set_status(f"link {n}: {target}  (Enter: follow, Esc: cancel)")
+            self.set_status(f"{url} | {len(links)} links | g:url/search  #+Enter:follow  b:back  r:reload  d/u:page  q:quit")
         elif event.key == "enter" and self.buffer:
             n, self.buffer = int(self.buffer), ""
             if 1 <= n <= len(self.links):

@@ -13,7 +13,7 @@ def _inline(node, base, links):
             continue
         if isinstance(child, NavigableString):
             out.append(str(child))
-        elif isinstance(child, Tag) and child.name not in SKIP:
+        elif isinstance(child, Tag) and child.name not in SKIP and child.name not in BLOCKS:
             text = _inline(child, base, links)
             if child.name == "a" and child.get("href") and text.strip():
                 href = child["href"]
@@ -27,6 +27,8 @@ def _inline(node, base, links):
 def parse(html: str, base_url: str):
     """Return (blocks, links). blocks is a list of (kind, text)."""
     soup = BeautifulSoup(html, "html.parser")
+    for t in soup(list(SKIP) + ["nav", "footer", "aside"]):
+        t.decompose()
     root = soup.body or soup
     links, blocks = [], []
     for el in root.find_all(BLOCKS):
