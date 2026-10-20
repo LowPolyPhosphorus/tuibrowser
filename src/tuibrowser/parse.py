@@ -16,8 +16,10 @@ def _inline(node, base, links):
         elif isinstance(child, Tag) and child.name not in SKIP:
             text = _inline(child, base, links)
             if child.name == "a" and child.get("href") and text.strip():
-                links.append(urljoin(base, child["href"]))
-                text = f"{text}[{len(links)}]"
+                href = child["href"]
+                if not href.startswith(("#", "javascript:", "mailto:")):
+                    links.append(urljoin(base, href))
+                    text = f"{text}[{len(links)}]"
             out.append(text)
     return "".join(out)
 
