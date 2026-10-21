@@ -32,6 +32,7 @@ class Browser(App):
     #url { dock: top; display: none; }
     #page { padding: 0 2; }
     #status { dock: bottom; height: 1; background: $accent; padding: 0 1; }
+    #find { dock: top; display: none;}
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -44,6 +45,10 @@ class Browser(App):
         ("u", "page up", "Page up"),
         ("f", "forward", "Forward"),
         ("m", "bookmark", "Bookmarks"),
+        ("slash", "find", "Find"),
+        ("n", "next_match", "Next match"),
+        ("N", "prev_match", "Prev match"),
+        ("question_mark", "show_help", "Help"),
     ]
 
     def __init__(self, start_url: str):
@@ -53,10 +58,13 @@ class Browser(App):
         self.links: list[str] = []
         self.history: list[str] = []
         self.forward: list[str] = []
+        self.matches: list[int] = []
+        self.match_i = -1
         self.buffer = ""
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="Enter URL and press Enter", id="url")
+        yield Input(placeholder="Find in page", id="find")
         with VerticalScroll(id="page"):
             yield Static("", id="content")
         yield Static("", id="status")
@@ -91,9 +99,10 @@ class Browser(App):
         if push:
             self.forward.clear()
         self.url, self.links = url, links
+        self.lines = build(blocks).plain.split("\n")
         self.query_one("#content", Static).update(build(blocks))
         self.query_one("#page").scroll_home(animate=False)
-        self.set_status(f"{url} | {len(links)} links | g:url  number+Enter:follow  b:back  q:quit")
+        self.set_status(f"{self.url} | {len(links)} links | g:url/search  #+Enter:follow  b:back  r:reload  d/u:page  q:quit")
 
     # --- actions ---
     def action_down(self) -> None:
@@ -127,6 +136,33 @@ class Browser(App):
     def action_bookmarks(self) -> None:
         self.load("about:bookmarks")
 
+    def action_show_help(self) -> None:
+        self.notify(
+            "j/k scroll | d/u page | g url/search | #+Enter follow | b/f back/fwd | "
+            "r reload | / find, n/N next/prev | m/o bookmarks | q quit",
+            timeout=10,
+        )
+            
+    def action_find(self) -> None:
+        box = self.query_one("#find", Input)
+        box.display = True
+        box.value = ""
+        box.focus()
+
+    def action_next_match(self) -> None:
+        self._goto_match(1)
+
+    def action_prev_match(self) -> None:
+        self._goto_match(-1)
+
+    def _goto_match(self, step: int) -> None:
+        if not self.matches:
+            self.set_status("No matches")
+            return
+        self.match_i = (self.match_i +step) % len(self.matches)
+        self.query_one("#page").scroll_to(y=self.matches[self.match_i], animate=False)
+        self.set_status(f"match {self.match_i + 1}/{len(self.matches)}")
+
     def action_reload(slef) -> None:
         if self.url:
             self.load(self.url, push=False)
@@ -141,20 +177,27 @@ class Browser(App):
         event.input.display = False
         self.query_one("#page").focus()
         text = event.value.strip()
-        if text:
-            if " " in text or ("." not in text and "://" not in text):
-                text = "https://html.duckduckgo.com/html/?q=" + quote_plus(text)
-            self.load(text)
+        if not text:
+            return
+        if event.input.id == "find":
+            q = text.lower()
+            self.matches = [i for i, l in enumerate(self.lines) if q in l.lower()]
+            self.match_i = -1
+            self.action_next_match()
+            return
+        if " " in text or ("." not in text and "://" not in text):
+            text = "https://html.duckduckgo.com/html/?q=" + quote_plus(text)
+        self.load(text)
 
     # --- link numbers: type digits, press Enter ---
     def on_key(self, event) -> None:
-        if self.query_one("#url", Input).has_focus:
+        if self.query_one("#url", Input).has_focus or self.query_one("#find", Input).has_focus:
             return
         if event.key.isdigit():
+            self.buffer += event.key
             n = int(self.buffer)
             target = self.links[n - 1] if 1 <= n <= len(self.links) else "no such link"
             self.set_status(f"link {n}: {target}  (Enter: follow, Esc: cancel)")
-            self.set_status(f"{url} | {len(links)} links | g:url/search  #+Enter:follow  b:back  r:reload  d/u:page  q:quit")
         elif event.key == "enter" and self.buffer:
             n, self.buffer = int(self.buffer), ""
             if 1 <= n <= len(self.links):
