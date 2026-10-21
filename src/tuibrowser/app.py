@@ -23,6 +23,7 @@ def build(blocks) -> Text:
             out.append(text + "\n\n", style="dim")
         else:
             out.append(text + "\n\n")
+    out.highlight_regex(r"\[\d+\]", "bold cyan")
     return out
 
 
