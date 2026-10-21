@@ -49,6 +49,7 @@ class Browser(App):
         ("n", "next_match", "Next match"),
         ("N", "prev_match", "Prev match"),
         ("question_mark", "show_help", "Help"),
+        ("e", "toggle_reader", "Reader mode"),
     ]
 
     def __init__(self, start_url: str):
@@ -59,6 +60,7 @@ class Browser(App):
         self.history: list[str] = []
         self.forward: list[str] = []
         self.matches: list[int] = []
+        self.reader = False
         self.match_i = -1
         self.buffer = ""
 
@@ -87,7 +89,7 @@ class Browser(App):
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
             final, html = fetch(url)
-            blocks, links = parse(html, final)
+            blocks, links = parse(html, final, self.reader)
         except Exception as e:
             self.call_from_thread(self.set_status, f"Error: {e}")
             return
@@ -135,6 +137,11 @@ class Browser(App):
 
     def action_bookmarks(self) -> None:
         self.load("about:bookmarks")
+
+    def action_toggle_reader(self) -> None:
+        self.reader = not self.reader
+        if self.url and not self.url.startswith("about:"):
+            self.load(self.url, push=False)
 
     def action_show_help(self) -> None:
         self.notify(
