@@ -4,6 +4,7 @@ from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
 from urllib.parse import quote_plus
+from textual.binding import Binding
 from pathlib import Path
 
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
@@ -12,7 +13,7 @@ from .fetch import fetch
 from .parse import parse
 
 
-def build(blocks) -> Text:
+def build(blocks, sel: int = 0) -> Text:
     out = Text()
     for kind, text in blocks:
         if kind.startswith("h"):
@@ -24,6 +25,8 @@ def build(blocks) -> Text:
         else:
             out.append(text + "\n\n")
     out.highlight_regex(r"\[\d+\]", "bold cyan")
+    if sel:
+        out.highlight_regex(rf"\[{sel}\]", "bold reverse")
     return out
 
 
@@ -50,6 +53,8 @@ class Browser(App):
         ("N", "prev_match", "Prev match"),
         ("question_mark", "show_help", "Help"),
         ("e", "toggle_reader", "Reader mode"),
+        Binding("tab", "next_link", "Next Link", priority=True),
+        Binding("shift+tab", "prev_link", "Prev link", priority=True),
     ]
 
     def __init__(self, start_url: str):
@@ -61,6 +66,8 @@ class Browser(App):
         self.forward: list[str] = []
         self.matches: list[int] = []
         self.reader = False
+        self.sel = 0
+        self.blocks = []
         self.match_i = -1
         self.buffer = ""
 
@@ -101,6 +108,8 @@ class Browser(App):
         if push:
             self.forward.clear()
         self.url, self.links = url, links
+        self.blocks = blocks
+        self.sel = 0
         self.lines = build(blocks).plain.split("\n")
         self.query_one("#content", Static).update(build(blocks))
         self.query_one("#page").scroll_home(animate=False)
@@ -142,6 +151,36 @@ class Browser(App):
         self.reader = not self.reader
         if self.url and not self.url.startswith("about:"):
             self.load(self.url, push=False)
+
+    def action_next_link(self) -> None:
+        self._select(1)
+
+    def action_prev_link(self) -> None:
+        self._select(-1)
+
+    def _select(self, step: int) -> None:
+        if self.query_one("#url", Input).has_focus or self.query_one("#find", Input).has_focus:
+            return
+        n = len(self.links)
+        if not n:
+            return
+        if self.sel == 0:
+            self.sel = 1 if step > 0 else n
+        else:
+            self.sel = (self.sel + step - 1) % n + 1
+        self.buffer = ""
+        self.query_one("#content", Static).update(build(self.blocks, self.sel))
+        self.query_one("#page").scroll_to(y=max(0, self._line_of(self.sel) - 3), animate=False)
+        self.set_status(f"[{self.sel}] {self.links[self.sel - 1]} (Enter: follow)")
+
+    def _line_of(self, n: int) -> int:
+        width = max(self.query_one("#content").size.width, 20)
+        y = 0
+        for line in self.lines:
+            if f"[{n}]" in line:
+                return y
+            y += max(1, -(-len(line) // width))
+        return 0
 
     def action_show_help(self) -> None:
         self.notify(
@@ -205,6 +244,8 @@ class Browser(App):
             n = int(self.buffer)
             target = self.links[n - 1] if 1 <= n <= len(self.links) else "no such link"
             self.set_status(f"link {n}: {target}  (Enter: follow, Esc: cancel)")
+        elif event.key == "enter" and self.sel and not self.buffer:
+            self.load(self.links[self.sel - 1])
         elif event.key == "enter" and self.buffer:
             n, self.buffer = int(self.buffer), ""
             if 1 <= n <= len(self.links):
