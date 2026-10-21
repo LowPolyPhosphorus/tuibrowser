@@ -4,6 +4,9 @@ from textual.app import App, ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
 from urllib.parse import quote_plus
+from pathlib import Path
+
+BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
 
 from .fetch import fetch
 from .parse import parse
@@ -38,6 +41,8 @@ class Browser(App):
         ("r", "reload", "Reload"),
         ("d", "page down", "Page down"),
         ("u", "page up", "Page up"),
+        ("f", "forward", "Forward"),
+        ("m", "bookmark", "Bookmarks"),
     ]
 
     def __init__(self, start_url: str):
@@ -46,6 +51,7 @@ class Browser(App):
         self.url = ""
         self.links: list[str] = []
         self.history: list[str] = []
+        self.forward: list[str] = []
         self.buffer = ""
 
     def compose(self) -> ComposeResult:
@@ -64,6 +70,11 @@ class Browser(App):
     # --- loading ---
     @work(thread=True, exclusive=True)
     def load(self, url: str, push: bool = True) -> None:
+        if url == "about:bookmarks":
+            urls = BOOKMARKS.read_text().split() if BOOKMARKS.exists() else []
+            blocks = [("h1", "Bookmarks")] + [("li", f"{u}[{i}]") for i, u in enumerate(urls, 1)]
+            self.call_from_thread(self.show, url, blocks, urls, push)
+            return
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
             final, html = fetch(url)
@@ -76,6 +87,8 @@ class Browser(App):
     def show(self, url, blocks, links, push) -> None:
         if push and self.url:
             self.history.append(self.url)
+        if push:
+            self.forward.clear()
         self.url, self.links = url, links
         self.query_one("#content", Static).update(build(blocks))
         self.query_one("#page").scroll_home(animate=False)
@@ -96,7 +109,22 @@ class Browser(App):
 
     def action_back(self) -> None:
         if self.history:
+            self.forward.append(self.url)
             self.load(self.history.pop(), push=False)
+
+    def action_forward(self) -> None:
+        if self.forward:
+            self.history.append(self.url)
+            self.load(self.forward.pop(), push=False)
+
+    def action_bookmark(self) -> None:
+        if self.url and not self.url.startswith("about:"):
+            with BOOKMARKS.open("a") as f:
+                f.write(self.url + "\n")
+            self.set_status(f"Bookmarked {self.url}")
+
+    def action_bookmarks(self) -> None:
+        self.load("about:bookmarks")
 
     def action_reload(slef) -> None:
         if self.url:
@@ -135,3 +163,7 @@ class Browser(App):
         elif event.key == "escape":
             self.buffer = ""
             self.set_status(self.url)
+
+def main():
+    import sys
+    Browser(sys.argv[1] if len(sys.argv) > 1 else "https://text.npr.org").run()

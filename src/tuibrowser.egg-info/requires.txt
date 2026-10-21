@@ -1,0 +1,3 @@
+textual
+httpx
+beautifulsoup4

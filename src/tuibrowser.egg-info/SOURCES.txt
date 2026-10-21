@@ -1,0 +1,12 @@
+pyproject.toml
+src/tuibrowser/__init__.py
+src/tuibrowser/__main__.py
+src/tuibrowser/app.py
+src/tuibrowser/fetch.py
+src/tuibrowser/parse.py
+src/tuibrowser.egg-info/PKG-INFO
+src/tuibrowser.egg-info/SOURCES.txt
+src/tuibrowser.egg-info/dependency_links.txt
+src/tuibrowser.egg-info/entry_points.txt
+src/tuibrowser.egg-info/requires.txt
+src/tuibrowser.egg-info/top_level.txt
