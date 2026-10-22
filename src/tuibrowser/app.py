@@ -1,5 +1,5 @@
 from pathlib import Path
-from urllib.parse import quote_plus, urlencode
+from urllib.parse import quote_plus, urlencode, urlparse
 
 from rich.text import Text
 from textual import work
@@ -13,6 +13,9 @@ from .parse import parse, parse_forms
 
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
 
+
+TAB_FIELDS = ("url", "links", "history", "forward", "blocks", "lines", 
+              "sel", "forms", "matches", "match_i")
 
 def build(blocks, sel: int = 0) -> Text:
     out = Text()
@@ -38,6 +41,7 @@ class Browser(App):
     #status { dock: bottom; height: 1; background: $accent; padding: 0 1; }
     #find { dock: top; display: none; }
     #fpr, { dock: top; display: none; }
+    #tabs { height: 1; background: $panel; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -57,6 +61,10 @@ class Browser(App):
         ("e", "toggle_reader", "Reader mode"),
         ("v", "view_source", "View source"),
         ("i", "fill_form", "Fill form"),
+        ("t", "new_tab", "New tab"),
+        ("x", "close_tab", "Close tab"),
+        ("right_square_bracket", "next_tab", "Next tab"),
+        ("left_square_bracket", "next_tab", "Next tab"),
         Binding("tab", "next_link", "Next Link", priority=True),
         Binding("shift+tab", "prev_link", "Prev link", priority=True),
     ]
@@ -69,14 +77,19 @@ class Browser(App):
         self.history: list[str] = []
         self.forward: list[str] = []
         self.matches: list[int] = []
-        self.reader = False
-        self.sel = 0
         self.blocks = []
         self.forms = []
+        self.lines = []
+        self.tabs = [{}]
+        self.cur = 0
+        self.gen = 0
+        self.sel = 0
         self.match_i = -1
         self.buffer = ""
+        self.reader = False
 
     def compose(self) -> ComposeResult:
+        yield Static("", id="tabs")
         yield Input(placeholder="Enter URL and press Enter", id="url")
         yield Input(placeholder="Find in page", id="find")
         yield Input(placeholder="Form text (enter to submit)", id="form")
@@ -95,10 +108,11 @@ class Browser(App):
     @work(thread=True, exclusive=True)
     def load(self, url: str, push: bool = True, data=None) -> None:
         self.forms = []
+        gen = self.gen
         if url == "about:bookmarks":
             urls = BOOKMARKS.read_text().split() if BOOKMARKS.exists() else []
             blocks = [("h1", "Bookmarks")] + [("li", f"{u}[{i}]") for i, u in enumerate(urls, 1)]
-            self.call_from_thread(self.show, url, blocks, urls, push)
+            self.call_from_thread(self._deliver, gen, url, blocks, urls, push)
             return
         if url.startswith("view-source:"):
             try:
@@ -106,7 +120,7 @@ class Browser(App):
             except Exception as e:
                 self.call_from_thread(self.set_status, f"Error: {e}")
                 return
-            self.call_from_thread(self.show, url, [("pre", raw[:200000])], [], push)
+            self.call_from_thread(self._deliver, gen, url, [("pre", raw[:200000])], [], push)
             return
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
@@ -116,7 +130,7 @@ class Browser(App):
         except Exception as e:
             self.call_from_thread(self.set_status, f"Error: {e}")
             return
-        self.call_from_thread(self.show, final, blocks, links, push)
+        self.call_from_thread(self._deliver, gen, final, blocks, links, push)
 
     def show(self, url, blocks, links, push) -> None:
         if push and self.url:
@@ -131,6 +145,7 @@ class Browser(App):
         self.query_one("#page").scroll_home(animate=False)
         form_hint = "i:form  " if self.forms else ""
         self.set_status(f"{self.url} | {len(links)} links | g:url  #+Enter:follow  {form_hint}b:back  q:quit  ?:help")
+        self._render_tabs()
 
     # --- actions ---
     def action_down(self) -> None:
@@ -172,6 +187,65 @@ class Browser(App):
     def action_view_source(self) -> None:
         if self.url and not self.url.startswith(("about:", "view-source:")):
             self.load("view-source:" + self.url)
+
+    def _deliver(self, gen, *args) -> None:
+        if gen == self.gen:
+            self.show(*args)
+
+    def _render_tabs(self) -> None:
+        bar = Text()
+        for i, st in enumerate(self.tabs):
+            url = self.url if i == self.cur else st.get("url", "")
+            label = urlparse(url).netloc or url or "new"
+            bar.append(f" {i + 1}:{label[:18]} ", style="bold reverse" if i == self.cur else "")
+        self.query_one("#tabs", Static).update(bar)
+
+    def _save_tab(self) -> None:
+        st = {k: getattr(self, k) for k in TAB_FIELDS}
+        st["scroll"] = self.query_one("#page").scroll_y
+        self.tabs[self.cur] = st
+
+    def _restore_tab(self) -> None:
+        self.gen += 1
+        self.buffer = ""
+        st = self.tabs[self.cur] or {
+            "url": "", "links": [], "history": [], "forward": [], "blocks": [],
+            "lines": [], "sel": 0, "forms": [], "matches": [], "match_i": -1, "scroll": 0,
+        }
+        for k in TAB_FIELDS:
+            setattr(self, k, st[k])
+        self.query_one("#content", Static).update(build(self.blocks, self.sel))
+        self.call_after_refresh(
+        self.call.query_one("#page").scroll_to(y=st["scroll"], animate=False)
+        )
+        self.set_status(self.url or "new tab")
+        self._render_tabs()
+
+    def _switch(self, step: int) -> None:
+        if len(self.tabs) < 2:
+            return
+        self._save_tab()
+        self.cur = (self.cur + step) % len(self.tabs)
+        self._restore_tab()
+
+    def action_next_tab(self) -> None:
+        self._switch(1)
+
+    def action_prev_tab(self) -> None:
+        self._switch(-1)
+
+    def action_new_tab(self) -> None:
+        self._save_tab()
+        self.tabs.append({})
+        self.cur = len(self.tabs) - 1
+        self._restore_tab()
+        self.load(self.start_url)
+
+    def action_close_tab(self) -> None:
+        if len(self.tabs) == 1:
+            self.set_status("Last tab (q to quit)")
+        self.tabs.pop(self.cur)
+        self.cur = min(self.cur, len(self.tabs) - 1)
 
     def action_fil_form(self) -> None:
         if not self.forms:

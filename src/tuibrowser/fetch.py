@@ -1,7 +1,10 @@
-import httpx
 import html as _html
 
-HEADERS = {"User-Agent": "tuibrowser/0.1 (+https://github.com/LowPolyPhosphorus/tuibrowser)"}
+import httpx
+
+HEADERS = {"User-Agent": "..."}   # keep your existing line
+
+_client = httpx.Client(follow_redirects=True, timeout=10, headers=HEADERS)
 
 
 def fetch(url: str, data: dict | None = None) -> tuple[str, str]:
