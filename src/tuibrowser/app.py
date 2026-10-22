@@ -1,3 +1,5 @@
+import tomllib
+
 from pathlib import Path
 from urllib.parse import quote_plus, urlencode, urlparse
 
@@ -14,6 +16,26 @@ from .parse import parse, parse_forms
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
 
 
+CONFIG = Path.home() / ".tuibrowser.toml"
+DEFAULTS = {
+    "start_page": "https://text.npr.org",
+    "search_url": "https://html.duckduckgo.com/html?q=",
+    "link_color": "bold cyan",
+}
+
+
+def load_config() -> dict:
+    cfg = dict(DEFAULTS)
+    try:
+        cfg.update(tomllib.loads(CONFIG.read_text(encoding="utf-8")))
+    except (OSError, tomllib.TOMLDecodeError):
+        pass
+    return cfg
+
+
+CFG = load_config()
+
+
 TAB_FIELDS = ("url", "links", "history", "forward", "blocks", "lines", 
               "sel", "forms", "matches", "match_i")
 
@@ -28,7 +50,7 @@ def build(blocks, sel: int = 0) -> Text:
             out.append(text + "\n\n", style="dim")
         else:
             out.append(text + "\n\n")
-    out.highlight_regex(r"\[\d+\]", "bold cyan")
+    out.highlight_regex(r"\[\d+\]", CFG["link_color"])
     if sel:
         out.highlight_regex(rf"\[{sel}\]", "bold reverse")
     return out
@@ -348,7 +370,7 @@ class Browser(App):
             self.action_next_match()
             return
         if " " in text or ("." not in text and "://" not in text):
-            text = "https://html.duckduckgo.com/html/?q=" + quote_plus(text)
+            text = CFG["search_url"] + quote_plus(text)
         self.load(text)
 
     # --- link numbers: type digits, press Enter ---
@@ -374,4 +396,4 @@ class Browser(App):
 
 def main():
     import sys
-    Browser(sys.argv[1] if len(sys.argv) > 1 else "https://text.npr.org").run()
+    Browser(sys.argv[1] if len(sys.argv) > 1 else CFG["start_page"]).run()

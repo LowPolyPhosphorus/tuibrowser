@@ -55,3 +55,7 @@ def test_tabs_open_and_close(monkeypatch):
             assert len(a.tabs) == 1
 
     asyncio.run(go())
+
+def test_config_defaults():
+    assert appmod.DEFAULTS["start_page"].startswith("https://")
+    assert "link_color" in appmod.load_config()
