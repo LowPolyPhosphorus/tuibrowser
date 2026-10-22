@@ -42,6 +42,7 @@ class Browser(App):
     #find { dock: top; display: none; }
     #fpr, { dock: top; display: none; }
     #tabs { height: 1; background: $panel; }
+    #form { dock: top; display: none; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -216,7 +217,7 @@ class Browser(App):
             setattr(self, k, st[k])
         self.query_one("#content", Static).update(build(self.blocks, self.sel))
         self.call_after_refresh(
-        self.call.query_one("#page").scroll_to(y=st["scroll"], animate=False)
+            lambda: self.query_one("#page").scroll_to(y=st["scroll"], animate=False)
         )
         self.set_status(self.url or "new tab")
         self._render_tabs()
