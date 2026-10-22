@@ -15,9 +15,11 @@ tuibrowser https://text.npr.org
 |---|---|
 | `j` / `k` | sroll down / up |
 | `d` / `u` | page down / up |
-| `g` | open URL bar (or search) |
+| `g` / `/` | open URL bar (or search) |
 | number + `Enter` | follow link |
 | `b` / `f` | back / forward |
 | `r` | reload |
 | `m` / `o` | bookmark / list bookmarks |
+| `t` | open new tab |
+| `x` | close current tab |
 | `q` | quit |
