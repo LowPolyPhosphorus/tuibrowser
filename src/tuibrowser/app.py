@@ -1,16 +1,17 @@
+from pathlib import Path
+from urllib.parse import quote_plus, urlencode
+
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
-from urllib.parse import quote_plus
-from textual.binding import Binding
-from pathlib import Path
-
-BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
 
 from .fetch import fetch
-from .parse import parse
+from .parse import parse, parse_forms
+
+BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
 
 
 def build(blocks, sel: int = 0) -> Text:
@@ -35,7 +36,8 @@ class Browser(App):
     #url { dock: top; display: none; }
     #page { padding: 0 2; }
     #status { dock: bottom; height: 1; background: $accent; padding: 0 1; }
-    #find { dock: top; display: none;}
+    #find { dock: top; display: none; }
+    #fpr, { dock: top; display: none; }
     """
     BINDINGS = [
         ("q", "quit", "Quit"),
@@ -53,6 +55,8 @@ class Browser(App):
         ("N", "prev_match", "Prev match"),
         ("question_mark", "show_help", "Help"),
         ("e", "toggle_reader", "Reader mode"),
+        ("v", "view_source", "View source"),
+        ("i", "fill_form", "Fill form"),
         Binding("tab", "next_link", "Next Link", priority=True),
         Binding("shift+tab", "prev_link", "Prev link", priority=True),
     ]
@@ -68,12 +72,14 @@ class Browser(App):
         self.reader = False
         self.sel = 0
         self.blocks = []
+        self.forms = []
         self.match_i = -1
         self.buffer = ""
 
     def compose(self) -> ComposeResult:
         yield Input(placeholder="Enter URL and press Enter", id="url")
         yield Input(placeholder="Find in page", id="find")
+        yield Input(placeholder="Form text (enter to submit)", id="form")
         with VerticalScroll(id="page"):
             yield Static("", id="content")
         yield Static("", id="status")
@@ -87,16 +93,26 @@ class Browser(App):
 
     # --- loading ---
     @work(thread=True, exclusive=True)
-    def load(self, url: str, push: bool = True) -> None:
+    def load(self, url: str, push: bool = True, data=None) -> None:
+        self.forms = []
         if url == "about:bookmarks":
             urls = BOOKMARKS.read_text().split() if BOOKMARKS.exists() else []
             blocks = [("h1", "Bookmarks")] + [("li", f"{u}[{i}]") for i, u in enumerate(urls, 1)]
             self.call_from_thread(self.show, url, blocks, urls, push)
             return
+        if url.startswith("view-source:"):
+            try:
+                _, raw = fetch(url[len("view-source:"):])
+            except Exception as e:
+                self.call_from_thread(self.set_status, f"Error: {e}")
+                return
+            self.call_from_thread(self.show, url, [("pre", raw[:200000])], [], push)
+            return
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
             final, html = fetch(url)
             blocks, links = parse(html, final, self.reader)
+            self.forms = parse_forms(html, final)
         except Exception as e:
             self.call_from_thread(self.set_status, f"Error: {e}")
             return
@@ -113,7 +129,8 @@ class Browser(App):
         self.lines = build(blocks).plain.split("\n")
         self.query_one("#content", Static).update(build(blocks))
         self.query_one("#page").scroll_home(animate=False)
-        self.set_status(f"{self.url} | {len(links)} links | g:url/search  #+Enter:follow  b:back  r:reload  d/u:page  q:quit")
+        form_hint = "i:form  " if self.forms else ""
+        self.set_status(f"{self.url} | {len(links)} links | g:url  #+Enter:follow  {form_hint}b:back  q:quit  ?:help")
 
     # --- actions ---
     def action_down(self) -> None:
@@ -152,6 +169,20 @@ class Browser(App):
         if self.url and not self.url.startswith("about:"):
             self.load(self.url, push=False)
 
+    def action_view_source(self) -> None:
+        if self.url and not self.url.startswith(("about:", "view-source:")):
+            self.load("view-source:" + self.url)
+
+    def action_fil_form(self) -> None:
+        if not self.forms:
+            self.set_status("No form with a text box on this page")
+            return
+        box = self.query_one("#form", Input)
+        box.placeholder = f"{self.forms[0]['text']}: (Enter to submit)"
+        box.display = True
+        box.value = ""
+        box.focus()
+
     def action_next_link(self) -> None:
         self._select(1)
 
@@ -159,7 +190,7 @@ class Browser(App):
         self._select(-1)
 
     def _select(self, step: int) -> None:
-        if self.query_one("#url", Input).has_focus or self.query_one("#find", Input).has_focus:
+        if any(self.query_one(i, Input).has_focus for i in ("#url", "#find", "#form")):
             return
         n = len(self.links)
         if not n:
@@ -225,6 +256,16 @@ class Browser(App):
         text = event.value.strip()
         if not text:
             return
+        if event.input.id == "form":
+            f = self.forms[0]
+            data = dict(f["fields"])
+            data[f["text"]] = text
+            if f["method"] == "post":
+                self.load(f["action"], data=data)
+            else:
+                sep = "&" if "?" in f["action"] else "?"
+                self.load(f["action"] + sep + urlencode(data))
+            return
         if event.input.id == "find":
             q = text.lower()
             self.matches = [i for i, l in enumerate(self.lines) if q in l.lower()]
@@ -237,7 +278,7 @@ class Browser(App):
 
     # --- link numbers: type digits, press Enter ---
     def on_key(self, event) -> None:
-        if self.query_one("#url", Input).has_focus or self.query_one("#find", Input).has_focus:
+        if any(self.query_one(i, Input).has_focus for i in ("#url", "#find", "#form")):
             return
         if event.key.isdigit():
             self.buffer += event.key

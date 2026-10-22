@@ -70,3 +70,25 @@ def parse(html: str, base_url: str, reader: bool = False):
         if text.strip():
             blocks.append((el.name, text))
     return blocks, links
+
+def parse_forms(html: str, base_url: str):
+    soup = BeautifulSoup(html, "html.parser")
+    forms = []
+    for f in soup.find_all("form"):
+        fields, text = {}, None
+        for i in f.find_all("input"):
+            name = i.get("name")
+            kind = (i.get("type") or "text").lower()
+            if not name or kind in ("submit", "button", "image", "reset", "file", "checkbox", "radio"):
+                continue
+            fields[name] = i.get("value", "")
+            if text is None and kind in ("text", "search", "email", "url"):
+                text = name
+        if text:
+            forms.append({
+                "action": urljoin(base_url, f.get("action") or base_url),
+                "method": (f.get("method") or "get").lower(),
+                "fields": fields,
+                "text": text,
+            })
+    return forms
