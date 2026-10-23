@@ -1,3 +1,4 @@
+import re
 import tomllib
 
 from pathlib import Path
@@ -10,7 +11,7 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
 
-from .fetch import fetch
+from .fetch import fetch, fetch_js
 from .parse import parse, parse_forms
 
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
@@ -51,6 +52,8 @@ def build(blocks, sel: int = 0) -> Text:
         else:
             out.append(text + "\n\n")
     out.highlight_regex(r"\[\d+\]", CFG["link_color"])
+    for m in re.finditer(r"\S*\[(\d+)\]", out.plain):
+        out.apply_meta({"@click": f"app.follow_link({m.group(1)})"}, m.start(), m.end())
     if sel:
         out.highlight_regex(rf"\[{sel}\]", "bold reverse")
     return out
@@ -62,7 +65,7 @@ class Browser(App):
     #page { padding: 0 2; }
     #status { dock: bottom; height: 1; background: $accent; padding: 0 1; }
     #find { dock: top; display: none; }
-    #fpr, { dock: top; display: none; }
+    #fpr { dock: top; display: none; }
     #tabs { height: 1; background: $panel; }
     #form { dock: top; display: none; }
     """
@@ -73,21 +76,23 @@ class Browser(App):
         ("g", "open_url", "Go to URL"),
         ("b", "back", "Back"),
         ("r", "reload", "Reload"),
-        ("d", "page down", "Page down"),
-        ("u", "page up", "Page up"),
+        ("d", "page_down", "Page down"),
+        ("u", "page_up", "Page up"),
         ("f", "forward", "Forward"),
         ("m", "bookmark", "Bookmarks"),
+        ("o", "bookmarks", "Open bookmarks"),
         ("slash", "find", "Find"),
         ("n", "next_match", "Next match"),
         ("N", "prev_match", "Prev match"),
         ("question_mark", "show_help", "Help"),
         ("e", "toggle_reader", "Reader mode"),
+        ("J", "toggle_js", "JS mode"),
         ("v", "view_source", "View source"),
         ("i", "fill_form", "Fill form"),
         ("t", "new_tab", "New tab"),
         ("x", "close_tab", "Close tab"),
         ("right_square_bracket", "next_tab", "Next tab"),
-        ("left_square_bracket", "next_tab", "Next tab"),
+        ("left_square_bracket", "prev_tab", "Prev. tab"),
         Binding("tab", "next_link", "Next Link", priority=True),
         Binding("shift+tab", "prev_link", "Prev link", priority=True),
     ]
@@ -110,6 +115,7 @@ class Browser(App):
         self.match_i = -1
         self.buffer = ""
         self.reader = False
+        self.js = False
 
     def compose(self) -> ComposeResult:
         yield Static("", id="tabs")
@@ -147,11 +153,12 @@ class Browser(App):
             return
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
-            final, html = fetch(url)
+            final, html = fetch_js(url) if self.js else fetch(url, data)
             blocks, links = parse(html, final, self.reader)
             self.forms = parse_forms(html, final)
         except Exception as e:
-            self.call_from_thread(self.set_status, f"Error: {e}")
+            self.call_from_thread(self.set_status, f"Error loading {url}: {e}")
+            self.call_from_thread(self._deliver, gen, url, [("h1", "Error"), ("p", str(e))], [], False)
             return
         self.call_from_thread(self._deliver, gen, final, blocks, links, push)
 
@@ -204,6 +211,12 @@ class Browser(App):
 
     def action_toggle_reader(self) -> None:
         self.reader = not self.reader
+        if self.url and not self.url.startswith("about:"):
+            self.load(self.url, push=False)
+
+    def action_toggle_js(self) -> None:
+        self.js = not self.js
+        self.set_status("JS mode ON (slower)" if self.js else "JS mode off")
         if self.url and not self.url.startswith("about:"):
             self.load(self.url, push=False)
 
@@ -270,7 +283,7 @@ class Browser(App):
         self.tabs.pop(self.cur)
         self.cur = min(self.cur, len(self.tabs) - 1)
 
-    def action_fil_form(self) -> None:
+    def action_fill_form(self) -> None:
         if not self.forms:
             self.set_status("No form with a text box on this page")
             return
@@ -310,6 +323,11 @@ class Browser(App):
             y += max(1, -(-len(line) // width))
         return 0
 
+    def action_follow_link(self, n: int) -> None:
+        if 1 <= n <= len(self.links):
+            self.buffer = ""
+            self.load(self.links[n - 1])
+
     def action_show_help(self) -> None:
         self.notify(
             "j/k scroll | d/u page | g url/search | #+Enter follow | b/f back/fwd | "
@@ -337,7 +355,7 @@ class Browser(App):
         self.query_one("#page").scroll_to(y=self.matches[self.match_i], animate=False)
         self.set_status(f"match {self.match_i + 1}/{len(self.matches)}")
 
-    def action_reload(slef) -> None:
+    def action_reload(self) -> None:
         if self.url:
             self.load(self.url, push=False)
 
