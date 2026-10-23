@@ -1,9 +1,17 @@
-from urllib.parse import urljoin
+from urllib.parse import parse_qs, urlparse, urljoin
 
 from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
 SKIP = {"script", "style", "noscript", "head", "svg", "template"}
 BLOCKS = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "pre"]
+
+def _unwrap(url: str) -> str:
+    u = urlparse(url)
+    if u.netloc.endswith("duckduckgo.com") and u.path.startswith("/l/"):
+        target = parse_qs(u.query).get("uddg")
+        if target:
+            return target[0]
+    return url
 
 
 def _inline(node, base, links, flat=False):
@@ -18,7 +26,7 @@ def _inline(node, base, links, flat=False):
             if child.name == "a" and child.get("href") and text.strip():
                 href = child["href"]
                 if not href.startswith(("#", "javascript:", "mailto:")):
-                    links.append(urljoin(base, href))
+                    links.append(_unwrap(urljoin(base, href)))
                     text = f"{text}[{len(links)}]"
             out.append(text)
     return "".join(out)
@@ -69,6 +77,8 @@ def parse(html: str, base_url: str, reader: bool = False):
             text = " ".join(text.split())
         if text.strip():
             blocks.append((el.name, text))
+        if not blocks:
+            blocks.append(("p", "No readable text found (blank, blocked, or JavaScript-only page)."))
     return blocks, links
 
 def parse_forms(html: str, base_url: str):
