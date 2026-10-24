@@ -5,11 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tuibrowser"
 version = "0.1.0"
-requires-python = ">=3.10"
-dependencies = ["textual", "httpx", "beautifulsoup4"]
+requires-python = ">=3.11"
+dependencies = ["textual", "httpx", "beautifulsoup4", "lxml]
 
 [project.scripts]
 tuibrowser = "tuibrowser.app:main"
+
+[project.optional-dependencies]
+js = ["playwright]
 
 [tool.setuptools.packages.find]
 where = ["src"]
