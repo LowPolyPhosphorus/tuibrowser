@@ -11,7 +11,8 @@ from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
 
-from .fetch import fetch, fetch_js
+from .fetch import close_js, fetch, fetch_js, fetch_layout
+from .layout import prepare, render as render_layout
 from .parse import parse, parse_forms
 
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
@@ -41,6 +42,9 @@ TAB_FIELDS = ("url", "links", "history", "forward", "blocks", "lines",
               "sel", "forms", "matches", "match_i")
 
 def build(blocks, sel: int = 0) -> Text:
+    if blocks and blocks[0][0] == "layout":
+        items, cols = blocks[0][1]
+        return render_layout(items, cols, CFG["link_color"], sel)
     out = Text()
     for kind, text in blocks:
         if kind.startswith("h"):
@@ -87,6 +91,7 @@ class Browser(App):
         ("question_mark", "show_help", "Help"),
         ("e", "toggle_reader", "Reader mode"),
         ("J", "toggle_js", "JS mode"),
+        ("L", "toggle_layout", "Layout mode"),
         ("v", "view_source", "View source"),
         ("i", "fill_form", "Fill form"),
         ("t", "new_tab", "New tab"),
@@ -116,6 +121,7 @@ class Browser(App):
         self.buffer = ""
         self.reader = False
         self.js = False
+        self.layout_on = False
 
     def compose(self) -> ComposeResult:
         yield Static("", id="tabs")
@@ -154,8 +160,18 @@ class Browser(App):
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
             final, html = fetch_js(url) if self.js else fetch(url, data)
+            html = html[:1_500_000]
             blocks, links = parse(html, final, self.reader)
             self.forms = parse_forms(html, final)
+            if self.layout_on:
+                cols = max(self.size.width - 4, 40)
+                final, items, html = fetch_layout(url, cols)
+                if not items:
+                    raise RuntimeError("Layout mode found no text on this page")
+                items, links = prepare(items)
+                self.forms = parse_forms(html[:1_500_000], final)
+                self.call_from_thread(self._deliver, gen, final, [("layout", (items, cols))], links, push)
+                return
         except Exception as e:
             self.call_from_thread(self.set_status, f"Error loading {url}: {e}")
             self.call_from_thread(self._deliver, gen, url, [("h1", "Error"), ("p", str(e))], [], False)
@@ -170,8 +186,9 @@ class Browser(App):
         self.url, self.links = url, links
         self.blocks = blocks
         self.sel = 0
-        self.lines = build(blocks).plain.split("\n")
-        self.query_one("#content", Static).update(build(blocks))
+        text = build(blocks)
+        self.lines = text.plain.split("\n")
+        self.query_one("#content", Static).update(text)
         self.query_one("#page").scroll_home(animate=False)
         form_hint = "i:form  " if self.forms else ""
         self.set_status(f"{self.url} | {len(links)} links | g:url  #+Enter:follow  {form_hint}b:back  q:quit  ?:help")
@@ -218,6 +235,12 @@ class Browser(App):
         self.js = not self.js
         self.set_status("JS mode ON (slower)" if self.js else "JS mode off")
         if self.url and not self.url.startswith("about:"):
+            self.load(self.url, push=False)
+
+    def action_toggle_layout(self) -> None:
+        self.layout_on = not self.layout_on
+        self.set_status("Layout mode ON (slow)" if self.layout_on else "Layout mode off")
+        if self.url and not self.url.startswith(("about:", "view-source:")):
             self.load(self.url, push=False)
 
     def action_view_source(self) -> None:
@@ -414,4 +437,7 @@ class Browser(App):
 
 def main():
     import sys
-    Browser(sys.argv[1] if len(sys.argv) > 1 else CFG["start_page"]).run()
+    try:
+        Browser(sys.argv[1] if len(sys.argv) > 1 else CFG["start_page"]).run()
+    finally:
+        close_js()
