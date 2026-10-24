@@ -82,7 +82,7 @@ def parse(html: str, base_url: str, reader: bool = False):
     return blocks, links
 
 def parse_forms(html: str, base_url: str):
-    soup = BeautifulSoup(html, "html.parser")
+    soup = BeautifulSoup(html, "lxml")
     forms = []
     for f in soup.find_all("form"):
         fields, text = {}, None
