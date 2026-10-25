@@ -1,8 +1,10 @@
+import os
 import re
 import tomllib
 
 from pathlib import Path
 from urllib.parse import quote_plus, unquote, urlencode, urlparse
+from .layout import CELL_H, HITS, STRETCH, prepare, render as render_layout
 
 from rich.text import Text
 from textual import work
@@ -15,7 +17,6 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .fetch import close_js, fetch, fetch_image, fetch_js, fetch_layout
 from .image import to_text
-from .layout import CELL_H, HITS, STRETCH, prepare, render as render_layout
 from .parse import parse, parse_forms
 
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
@@ -158,7 +159,7 @@ class Browser(App):
         self.reader = False
         self.js = False
         self.layout_on = False
-
+    
     def compose(self) -> ComposeResult:
         yield Static("", id="tabs")
         yield Input(placeholder="Enter URL and press Enter", id="url")
@@ -195,14 +196,6 @@ class Browser(App):
             return
         self.call_from_thread(self.set_status, f"Loading {url} ...")
         try:
-            final, html = fetch_js(url) if self.js else fetch(url, data)
-            html = html[:1_500_000]
-            blocks, links = parse(html, final, self.reader)
-            if CFG["images"]:
-                blocks = self._with_images(blocks)
-            else:
-                blocks = [b for b in blocks if b[0] != "img"]
-            self.forms = parse_forms(html, final)
             if self.layout_on:
                 cols = max(self.size.width - 10, 40)
                 final, items, html = fetch_layout(url, int(cols / STRETCH))
@@ -212,6 +205,14 @@ class Browser(App):
                 self.forms = parse_forms(html[:1_500_000], final)
                 self.call_from_thread(self._deliver, gen, final, [("layout", (items, cols))], links, push)
                 return
+            final, html = fetch_js(url) if self.js else fetch(url, data)
+            html = html[:1_500_000]
+            blocks, links = parse(html, final, self.reader)
+            if CFG["images"]:
+                blocks = self._with_images(blocks)
+            else:
+                blocks = [b for b in blocks if b[0] != "img"]
+            self.forms = parse_forms(html, final)
         except Exception as e:
             self.call_from_thread(self.set_status, f"Error loading {url}: {e}")
             self.call_from_thread(self._deliver, gen, url, [("h1", "Error"), ("p", str(e))], [], False)
@@ -263,10 +264,10 @@ class Browser(App):
 
     # --- actions ---
     def action_down(self) -> None:
-        self.query_one("#page").scroll_down()
+        self.query_one("#page").scroll_down(animate=False)
 
     def action_up(self) -> None:
-        self.query_one("#page").scroll_up()
+        self.query_one("#page").scroll_up(animate=False)
 
     def action_open_url(self) -> None:
         box = self.query_one("#url", Input)
@@ -429,6 +430,16 @@ class Browser(App):
                 return
             self.load(target)
 
+    def _jump(self, frag: str) -> bool:
+        if not (self.blocks and self.blocks[0][0] == "layout"):
+            return False
+        frag = unquote(frag)
+        for it in self.blocks[0][1][0]:
+            if it.get("anchor") == frag:
+                self.query_one("#page").scroll_to(y=max(0, round(it["y"] / CELL_H) - 1), animate=False)
+                return True
+        return False
+
     async def on_click(self, event) -> None:
         if len(self.screen_stack) > 1:
             return
@@ -493,10 +504,10 @@ class Browser(App):
             self.load(self.url, push=False)
 
     def action_page_down(self) -> None:
-        self.query_one("#page").scroll_page_down()
+        self.query_one("#page").scroll_page_down(animate=False)
 
     def action_page_up(self) -> None:
-        self.query_one("#page").scroll_page_up()
+        self.query_one("#page").scroll_page_up(animate=False)
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         event.input.display = False
@@ -549,6 +560,7 @@ class Browser(App):
 
 def main():
     import sys
+    os.environ.setdefault("TEXTUAL_ANIMATIONS", "none")
     try:
         Browser(sys.argv[1] if len(sys.argv) > 1 else CFG["start_page"]).run()
     finally:
