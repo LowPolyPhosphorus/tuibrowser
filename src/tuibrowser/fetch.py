@@ -75,17 +75,18 @@ def close_js() -> None:
 _LAYOUT_JS = r"""
 () => {
   const out = [], ids = new Map(), wanted = new Set(), hiddenCache = new Map();
-  const isHidden = (el) => {
-    if (hiddenCache.has(el)) return hiddenCache.get(el);
-    let hide = false;
-    for (let e = el; e && e !== document.body; e = e.parentElement) {
-      const s = getComputedStyle(e);
-      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') { hide = true; break; }
+  const isHidden = (e) => {
+    if (!e || e === document.body) return false;
+    if (hiddenCache.has(e)) return hiddenCache.get(e);
+    const s = getComputedStyle(e);
+    let hide = s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0';
+    if (!hide) {
       const r = e.getBoundingClientRect();
       const clipped = s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.clip !== 'auto' || s.clipPath !== 'none';
-      if ((r.width <= 2 || r.height <= 2) && clipped) { hide = true; break; }
+      hide = (r.width <= 2 || r.height <= 2) && clipped;
     }
-    hiddenCache.set(el, hide);
+    if (!hide) hide = isHidden(e.parentElement);
+    hiddenCache.set(e, hide);
     return hide;
   };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
