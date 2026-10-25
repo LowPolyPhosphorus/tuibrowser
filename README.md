@@ -16,7 +16,7 @@ A text-mode web browser for your terminal, built with Python and Textual.
     * Open a new tab with `t`, close the current tab with `w`
     * Switch tabs with `]` and `[`
 
-* **Forms and search**
+* **Forms and search** **
     * Fill in a pages's text form from inside the TUI (`i`)
     * Type a query into the adress bar to search with your default engine (DuckDuckGo by default)
 
@@ -24,12 +24,12 @@ A text-mode web browser for your terminal, built with Python and Textual.
     * Inline images are rendered as text
     * In layout mode, click an `[img]` marker to open the image in a popup
 
-* **Layout mode** (`l`)
+* **Layout mode** (`l`)**
     * Renders the page roughly as a real browser would lay it out, with sidebars and columns in place
     * Click links and image markers with the mouse
     * Needs Playwright (see below)
 
-* **JS mode** (`J`)
+* **JS mode** (`J`)**
     * Loads pages in a headless browser so JS rendered sites work
     * Needs playwright (see below)
 
@@ -81,3 +81,7 @@ playwright install chromium
 | `q` | quit |
  
 Bookmarks are stored in `~/.tuibrowser_bookmarks`.
+
+** : Beta feature W.I.P.
+
+> MIT [LICENSE](/LICENSE)
