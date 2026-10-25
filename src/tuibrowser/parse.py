@@ -63,8 +63,18 @@ def parse(html: str, base_url: str, reader: bool = False):
     table_ids = {id(t) for t in tables}
     in_table = {id(d) for t in tables for d in t.descendants}
     links, blocks = [], []
-    for el in root.find_all(BLOCKS + ["table"]):
+    for el in root.find_all(BLOCKS + ["table", "img"]):
         if id(el) in in_table:
+            continue
+        if el.name == "img":
+            src = el.get("src") or ""
+            if not src or src.startswith("data:"):
+                src = el.get("data-src") or el.get("data-lazy-src") or el.get("data-original") or ""
+            if not src and el.get("srcset"):
+                src = el["srcset"].split(",")[0].split()[0]
+            small = any(str(el.get(a, "")).isdigit() and int(el.get(a)) < 40 for a in ("width", "height"))
+            if src and not src.startswith("data:") and not small:
+                blocks.append(("img", urljoin(base_url, src)))
             continue
         if el.name == "table":
             if id(el) in table_ids:
