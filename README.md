@@ -11,10 +11,14 @@ A text-mode web browser for your terminal, built with Python and Textual.
     * Bookmarks
     * Reader mode for stripping a page down to its article text 
 
+https://user-cdn.hackclub-assets.com/01a171af-c43b-7d16-8064-304d4157176f/Screenshot%202026-10-24%20231121.png
+
 * **Tabs**
     * Multi-tab support
     * Open a new tab with `t`, close the current tab with `w`
     * Switch tabs with `]` and `[`
+
+https://user-cdn.hackclub-assets.com/01a171b0-eb39-7bb8-9f77-a789fdbafb2a/Screenshot%202026-10-24%20231246.png
 
 * **Forms and search** **
     * Fill in a pages's text form from inside the TUI (`i`)
@@ -24,14 +28,20 @@ A text-mode web browser for your terminal, built with Python and Textual.
     * Inline images are rendered as text
     * In layout mode, click an `[img]` marker to open the image in a popup
 
+https://user-cdn.hackclub-assets.com/01a171b1-c66e-7cd9-b95b-856de06312b0/Screenshot%202026-10-24%20231342.png
+
 * **Layout mode** (`l`)**
     * Renders the page roughly as a real browser would lay it out, with sidebars and columns in place
     * Click links and image markers with the mouse
     * Needs Playwright (see below)
 
+https://user-cdn.hackclub-assets.com/01a171b3-7ad3-7ecb-a561-2e5e1e3b8ec5/Screenshot%202026-10-24%20231519.png
+
 * **JS mode** (`J`)**
     * Loads pages in a headless browser so JS rendered sites work
     * Needs playwright (see below)
+
+https://user-cdn.hackclub-assets.com/01a171b4-fa32-7dcb-9a1e-5f19b5c1aa26/Screenshot%202026-10-24%20231707.png
 
 * **Customization**
     * Configure it with a TOML file at `~/.tuibrowser.toml`:
