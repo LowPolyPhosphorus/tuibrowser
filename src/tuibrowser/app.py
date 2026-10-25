@@ -2,7 +2,7 @@ import re
 import tomllib
 
 from pathlib import Path
-from urllib.parse import quote_plus, urlencode, urlparse
+from urllib.parse import quote_plus, unquote, urlencode, urlparse
 
 from rich.text import Text
 from textual import work
@@ -10,9 +10,12 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.widgets import Input, Static
+from textual.screen import ModalScreen
+from concurrent.futures import ThreadPoolExecutor
 
-from .fetch import close_js, fetch, fetch_js, fetch_layout
-from .layout import prepare, render as render_layout
+from .fetch import close_js, fetch, fetch_image, fetch_js, fetch_layout
+from .image import to_text
+from .layout import CELL_H, HITS, STRETCH, prepare, render as render_layout
 from .parse import parse, parse_forms
 
 BOOKMARKS = Path.home() / ".tuibrowser_bookmarks"
@@ -23,6 +26,7 @@ DEFAULTS = {
     "start_page": "https://text.npr.org",
     "search_url": "https://html.duckduckgo.com/html?q=",
     "link_color": "bold cyan",
+    "images": True,
 }
 
 
@@ -53,6 +57,8 @@ def build(blocks, sel: int = 0) -> Text:
             out.append("  • " + text + "\n")
         elif kind == "pre":
             out.append(text + "\n\n", style="dim")
+        elif kind == "img":
+            out.append_text(text)
         else:
             out.append(text + "\n\n")
     out.highlight_regex(r"\[\d+\]", CFG["link_color"])
@@ -61,6 +67,36 @@ def build(blocks, sel: int = 0) -> Text:
     if sel:
         out.highlight_regex(rf"\[{sel}\]", "bold reverse")
     return out
+
+
+class ImageScreen(ModalScreen):
+    BINDINGS = [("escape", "close", "Close")]
+    DEFAULT_CSS = """
+    #imgbox { width: 92%; height: 92%; border: round $accent; background: $surface; }
+    """
+
+    def __init__(self, url: str):
+        super().__init__()
+        self.url = url
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="imgbox"):
+            yield Static("Loading image ...", id="imgview")
+
+    def on_mount(self) -> None:
+        self.load_image(self.query_one("#imgview", Static))
+
+    @work(thread=True)
+    def load_image(self, view: Static) -> None:
+        width = max(20, min(self.app.size.width - 8, 100))
+        try:
+            out = to_text(fetch_image(self.url), width)
+        except Exception as e:
+            out = Text(f"Could not load image: {e}")
+        self.app.call_from_thread(view.update, out)
+
+    def action_close(self) -> None:
+        self.dismiss()
 
 
 class Browser(App):
@@ -95,7 +131,7 @@ class Browser(App):
         ("v", "view_source", "View source"),
         ("i", "fill_form", "Fill form"),
         ("t", "new_tab", "New tab"),
-        ("x", "close_tab", "Close tab"),
+        ("w", "close_tab", "Close tab"),
         ("right_square_bracket", "next_tab", "Next tab"),
         ("left_square_bracket", "prev_tab", "Prev. tab"),
         Binding("tab", "next_link", "Next Link", priority=True),
@@ -162,10 +198,14 @@ class Browser(App):
             final, html = fetch_js(url) if self.js else fetch(url, data)
             html = html[:1_500_000]
             blocks, links = parse(html, final, self.reader)
+            if CFG["images"]:
+                blocks = self._with_images(blocks)
+            else:
+                blocks = [b for b in blocks if b[0] != "img"]
             self.forms = parse_forms(html, final)
             if self.layout_on:
-                cols = max(self.size.width - 4, 40)
-                final, items, html = fetch_layout(url, cols)
+                cols = max(self.size.width - 10, 40)
+                final, items, html = fetch_layout(url, int(cols / STRETCH))
                 if not items:
                     raise RuntimeError("Layout mode found no text on this page")
                 items, links = prepare(items)
@@ -177,6 +217,33 @@ class Browser(App):
             self.call_from_thread(self._deliver, gen, url, [("h1", "Error"), ("p", str(e))], [], False)
             return
         self.call_from_thread(self._deliver, gen, final, blocks, links, push)
+
+    def _with_images(self, blocks):
+        urls = [t for k, t in blocks if k == "img" and ".svg" not in t.lower()][:14]
+        if not urls:
+            return [b for b in blocks if b[0] != "img"]
+        width = max(20, min(self.size.width - 6, 70))
+        errs = []
+
+        def get(u):
+            try:
+                return to_text(fetch_image(u), width)
+            except Exception as e:
+                errs.append(f"{type(e).__name__}: {str(e)[:70]}")
+                return None
+
+        with ThreadPoolExecutor(6) as ex:
+            done = dict(zip(urls, ex.map(get, urls)))
+        shown, out = 0, []
+        for kind, text in blocks:
+            if kind != "img":
+                out.append((kind, text))
+            elif done.get(text) is not None and shown < 6:
+                shown += 1
+                out.append((kind, done[text]))
+        why = f" ({errs[0]})" if errs else ""
+        self.call_from_thread(self.notify, f"Images: {shown} shown, {len(errs)} of {len(urls)} failed{why}")
+        return out
 
     def show(self, url, blocks, links, push) -> None:
         if push and self.url:
@@ -257,6 +324,10 @@ class Browser(App):
             url = self.url if i == self.cur else st.get("url", "")
             label = urlparse(url).netloc or url or "new"
             bar.append(f" {i + 1}:{label[:18]} ", style="bold reverse" if i == self.cur else "")
+        if self.js:
+            bar.append(" JS ", style="bold black on yellow")
+        if self.layout_on:
+            bar.append(" LAYOUT ", style="bold black on green")
         self.query_one("#tabs", Static).update(bar)
 
     def _save_tab(self) -> None:
@@ -303,8 +374,11 @@ class Browser(App):
     def action_close_tab(self) -> None:
         if len(self.tabs) == 1:
             self.set_status("Last tab (q to quit)")
+            return
         self.tabs.pop(self.cur)
         self.cur = min(self.cur, len(self.tabs) - 1)
+        self._restore_tab()
+        self._render_tabs()
 
     def action_fill_form(self) -> None:
         if not self.forms:
@@ -349,7 +423,43 @@ class Browser(App):
     def action_follow_link(self, n: int) -> None:
         if 1 <= n <= len(self.links):
             self.buffer = ""
-            self.load(self.links[n - 1])
+            target = self.links[n - 1]
+            base, _, frag = target.partition("#")
+            if frag and base == self.url.partition("#")[0] and self._jump(frag):
+                return
+            self.load(target)
+
+    async def on_click(self, event) -> None:
+        if len(self.screen_stack) > 1:
+            return
+        if (getattr(event.style, "meta", None) or {}).get("@click"):
+            return
+        if not (self.blocks and self.blocks[0][0] == "layout"):
+            return
+        region = self.query_one("#content").region
+        row, col = event.screen_y - region.y, event.screen_x - region.x
+        best = None
+        for r, c, ln, act in HITS:
+            if abs(r - row) <= 1 and c -1 <= col <= c + ln:
+                if best is None or abs(r - row) < best[0]:
+                    best = (abs(r - row), act)
+        if best:
+            await self.run_action(best[1].removeprefix("app."))
+            return
+        near = sorted(HITS, key=lambda h: abs(h[0] - row))[:2]
+        self.set_status(f"click row {row} col {col}; nearest: " + ", ".join(f"({h[0]},{h[1]})" for h in near))
+
+    def check_action(self, action: str, parameters) -> bool | None:
+        if len(self.screen_stack) > 1:
+            return action == "quit"
+        return True
+
+    def action_show_image(self, i: int) -> None:
+        if not (self.blocks and self.blocks[0][0] == "layout"):
+            return
+        imgs = [it["img"] for it in self.blocks[0][1][0] if it.get("img")]
+        if 0 <= i < len(imgs):
+            self.push_screen(ImageScreen(imgs[i]))
 
     def action_show_help(self) -> None:
         self.notify(
@@ -416,6 +526,8 @@ class Browser(App):
 
     # --- link numbers: type digits, press Enter ---
     def on_key(self, event) -> None:
+        if len(self.screen_stack) > 1:
+            return
         if any(self.query_one(i, Input).has_focus for i in ("#url", "#find", "#form")):
             return
         if event.key.isdigit():
@@ -424,11 +536,11 @@ class Browser(App):
             target = self.links[n - 1] if 1 <= n <= len(self.links) else "no such link"
             self.set_status(f"link {n}: {target}  (Enter: follow, Esc: cancel)")
         elif event.key == "enter" and self.sel and not self.buffer:
-            self.load(self.links[self.sel - 1])
+            self.load(self.links[self.sel])
         elif event.key == "enter" and self.buffer:
             n, self.buffer = int(self.buffer), ""
             if 1 <= n <= len(self.links):
-                self.load(self.links[n - 1])
+                self.action_follow_link(n)
             else:
                 self.set_status(f"No link {n}")
         elif event.key == "escape":
