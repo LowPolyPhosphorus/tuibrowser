@@ -65,7 +65,7 @@ def render(items, cols, link_style, sel=0):
             style = "bold black on white"
             act = f"app.show_image({it['i']})"
         marks.setdefault(row, []).append((c, len(text), style, act))
-    out = Text()
+    out = Text(no_wrap=True)
     HITS.clear()
     for r in range(max(rows) + 1 if rows else 0):
         start = len(out)
@@ -74,6 +74,5 @@ def render(items, cols, link_style, sel=0):
             if style:
                 out.stylize(style, start + c, start + c + ln)
             if act:
-                out.apply_meta({"@click": act}, start + c, start + c + ln)
                 HITS.append((r, c, ln, act))
     return out
