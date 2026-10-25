@@ -4,7 +4,7 @@ import httpx
 from concurrent.futures import ThreadPoolExecutor
 from .layout import CELL_W
 
-HEADERS = {"User-Agent": "tuibrowser/0.1"}
+HEADERS = {"User-Agent": "tuibrowser/0.1 (+https://github.com/LowPolyPhosphorus/tuibrowser; terminal browser) httpx"}
 
 _client = httpx.Client(follow_redirects=True, timeout=10, headers=HEADERS)
 
@@ -48,6 +48,14 @@ def _pw_fetch(url: str) -> tuple[str, str]:
     finally:
         page.close()
 
+def _run_pw(fn, *args):
+    global _pw_pool
+    try:
+        return _pw_pool.submit(fn, *args).result(timeout=45)
+    except Exception:
+        _pw.clear()
+        _pw_pool = ThreadPoolExecutor(max_workers=1)
+        raise
 
 def fetch_js(url: str) -> tuple[str, str]:
     try:
@@ -56,7 +64,7 @@ def fetch_js(url: str) -> tuple[str, str]:
         raise RuntimeError("JS mode needs: pip install playwright, then: playwright install chromium")
     if "://" not in url:
         url = "https://" + url
-    return _pw_pool.submit(_pw_fetch, url).result()
+    return _run_pw(_pw_fetch, url)
 
 
 def close_js() -> None:
@@ -66,7 +74,20 @@ def close_js() -> None:
 
 _LAYOUT_JS = r"""
 () => {
-  const out = [], ids = new Map();
+  const out = [], ids = new Map(), wanted = new Set(), hiddenCache = new Map();
+  const isHidden = (el) => {
+    if (hiddenCache.has(el)) return hiddenCache.get(el);
+    let hide = false;
+    for (let e = el; e && e !== document.body; e = e.parentElement) {
+      const s = getComputedStyle(e);
+      if (s.display === 'none' || s.visibility === 'hidden' || s.opacity === '0') { hide = true; break; }
+      const r = e.getBoundingClientRect();
+      const clipped = s.overflowX !== 'visible' || s.overflowY !== 'visible' || s.clip !== 'auto' || s.clipPath !== 'none';
+      if ((r.width <= 2 || r.height <= 2) && clipped) { hide = true; break; }
+    }
+    hiddenCache.set(el, hide);
+    return hide;
+  };
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   let n, count = 0;
@@ -75,11 +96,15 @@ _LAYOUT_JS = r"""
     if (!el || ['SCRIPT', 'STYLE', 'NOSCRIPT', 'TEMPLATE'].includes(el.tagName)) continue;
     const text = n.textContent;
     if (!text.trim()) continue;
+    if (isHidden(el)) continue;
     const cs = getComputedStyle(el);
-    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
     const a = el.closest('a[href]');
     let href = null, aid = null;
-    if (a && /^https?:/i.test(a.href) && !(a.getAttribute('href') || '').startsWith('#')) {
+    const raw = a ? (a.getAttribute('href') || '') : '';
+    if (a && /^https?:/i.test(a.href) && raw !== '#') {
+      if (raw.startsWith('#')) {
+        try { wanted.add(decodeURIComponent(raw.slice(1))); } catch (e) {}
+      }
       href = a.href;
       if (!ids.has(a)) ids.set(a, ids.size);
       aid = ids.get(a);
@@ -101,6 +126,25 @@ _LAYOUT_JS = r"""
       }
       count++;
     }
+  }
+  for (const id of wanted) {
+    const t = document.getElementById(id);
+    if (!t) continue;
+    const r = t.getBoundingClientRect();
+    out.push({x: 0, y: Math.round(r.top + scrollY), text: '', anchor: id, aid: null, href: null, b: false});
+  }
+  let k = 0;
+  for (const im of document.images) {
+    if (k >= 40) break;
+    const r = im.getBoundingClientRect();
+    if (r.width < 32 || r.height < 32) continue;
+    const cs = getComputedStyle(im);
+    if (cs.visibility === 'hidden' || cs.display === 'none' || cs.opacity === '0') continue;
+    let src = im.currentSrc || im.getAttribute('data-src') || im.src || '';
+    if (!src || src.startsWith('data:') || /\.svg(\?|$)/i.test(src)) continue;
+    try { src = new URL(src, document.baseURI).href; } catch (e) { continue; }
+    out.push({x: Math.round(r.left + scrollX), y: Math.round(r.top + scrollY), text: '[img]', img: src, aid: null, href: null, b: true});
+    k++;
   }
   return out;
 }
@@ -135,4 +179,11 @@ def fetch_layout(url: str, cols: int):
         raise RuntimeError("Layout mode needs: pip install playwright, then: playwright install chromium")
     if "://" not in url:
         url = "https://" + url
-    return _pw_pool.submit(_pw_layout, url, cols).result()
+    return _run_pw(_pw_layout, url, cols)
+
+def fetch_image(url: str) -> bytes:
+    r = _client.get(url)
+    r.raise_for_status()
+    if len(r.content) > 3_000_000:
+        raise ValueError("image too large")
+    return r.content
