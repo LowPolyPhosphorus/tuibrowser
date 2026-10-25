@@ -50,7 +50,7 @@ def test_tabs_open_and_close(monkeypatch):
             await pilot.press("t")
             await pilot.pause(0.5)
             assert len(a.tabs) == 2 and a.cur == 1
-            await pilot.press("x")
+            await pilot.press("w")
             await pilot.pause(0.2)
             assert len(a.tabs) == 1
 
