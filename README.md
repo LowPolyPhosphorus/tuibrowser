@@ -52,17 +52,33 @@ A text-mode web browser for your terminal, built with Python and Textual.
 
 ## Install
 ```
-git clone https://github.com/LowPolyPhosphorus/tuibrowser
-cd tuibrowser
-pip install -e .
+pipx install tuibrowser
+```
+
+or `pip install tuibrowser`. Requires Python 3.11+. Then run:
+
+```
+tuibrowser
 tuibrowser https://example.com
 ```
 
-JS mode and layout mode need Playwright:
+### Optional: JS and Layout modes
+
+These need Playwright and a Chromium download (about 150 MB):
 
 ```
-pip install playwright
+pip install "tuibrowser[js]"
 playwright install chromium
+```
+
+Press **Shift+J** for JS rendering or **Shift+L** for layout mode (experimental).
+
+### From source
+
+```
+git clone https://github.com/LowPolyPhosphorus/tuibrowser
+cd tuibrowser
+pip install -e .
 ```
 
 ## Keys
