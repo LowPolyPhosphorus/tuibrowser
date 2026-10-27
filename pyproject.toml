@@ -8,13 +8,13 @@ version = "0.1.0"
 description = "A terminal web browser with tabs, reader mode, form filling, and an option Playwright layout mode"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {text = "MIT"}
+license = "MIT"
 authors = [{name = "LowPolyPhosphorus"}]
 keywords = ["terminal", "tui", "browser", "textual"]
 classifiers = [
-    "Enviroment :: Console",
-    "Programming language :: Python :: 3",
-    "Topic :: Internet :: WWW/HTTP :: Browser",
+    "Environment :: Console",
+    "Programming Language :: Python :: 3",
+    "Topic :: Internet :: WWW/HTTP :: Browsers",
 ]
 dependencies = ["textual", "httpx", "beautifulsoup4", "lxml", "pillow"]
 
